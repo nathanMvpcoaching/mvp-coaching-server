@@ -175,13 +175,19 @@ async def call_claude_vision(game: str, filename: str, frames_b64: list) -> dict
 Je vais te montrer {len(frames_b64)} captures d'écran extraites d'une replay de {game} ({filename}).
 Ces captures sont réparties uniformément sur toute la durée de la partie.
 
-Analyse ATTENTIVEMENT chaque image et observe :
-- L'interface du jeu (HUD, minimap, score, économie, timer)
-- Les positions des joueurs sur la minimap
-- L'état de la partie (round en cours, score, phase)
-- Les actions visibles (combat, déplacement, utilisation de capacités)
-- Les erreurs de positionnement, placement, timing visibles
-- La gestion des ressources
+Tu es un coach sévère mais bienveillant. Tu NE décris PAS ce que tu vois.
+Tu identifies directement CE QUE LE JOUEUR FAIT MAL et comment le corriger.
+
+Pour chaque capture, pose-toi ces questions :
+- Quelle erreur précise le joueur commet-il ici ?
+- Quelle aurait été la bonne décision dans cette situation ?
+- Quel exercice concret va corriger cette erreur ?
+
+INTERDIT : décrire la scène, raconter ce qui se passe
+OBLIGATOIRE : identifier l'erreur, expliquer la correction, donner un exercice
+Pour les points "info" uniquement : cite un truc que le joueur fait BIEN
+et pourquoi c'est une bonne habitude à garder.
+Les points "critique" et "alerte" restent focalisés sur les corrections.
 
 Voici les captures :"""
     })
