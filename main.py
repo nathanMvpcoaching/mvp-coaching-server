@@ -1,5 +1,5 @@
 """
-MVP.coaching — Serveur FastAPI
+MVP.coaching — Serveur FastAPI avec analyse vidéo réelle
 Lance avec : uvicorn main:app --reload --port 8000
 """
 
@@ -7,11 +7,14 @@ import os
 import uuid
 import json
 import re
+import base64
 import asyncio
 from pathlib import Path
 from typing import Optional
 
 import anthropic
+import cv2
+import numpy as np
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,7 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-app = FastAPI(title="MVP.coaching API", version="1.0.0")
+app = FastAPI(title="MVP.coaching API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,7 +48,7 @@ class AnalysisStatus(BaseModel):
 
 @app.get("/")
 def health():
-    return {"status": "ok", "service": "MVP.coaching API"}
+    return {"status": "ok", "service": "MVP.coaching API v2 — Vision activée"}
 
 
 @app.post("/v1/analyses", response_model=AnalysisStatus)
@@ -82,21 +85,63 @@ async def get_analysis(aid: str):
     return AnalysisStatus(**analyses[aid])
 
 
+def extract_frames(filepath: str, num_frames: int = 8) -> list:
+    cap = cv2.VideoCapture(filepath)
+    if not cap.isOpened():
+        raise ValueError(f"Impossible d'ouvrir la vidéo : {filepath}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    duration = total_frames / fps if fps > 0 else 0
+    print(f"[INFO] Vidéo : {duration:.1f}s, {total_frames} frames, {fps:.1f} fps")
+
+    positions = [
+        int(total_frames * (0.05 + 0.90 * i / (num_frames - 1)))
+        for i in range(num_frames)
+    ]
+
+    frames_b64 = []
+    for pos in positions:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        h, w = frame.shape[:2]
+        if w > 800:
+            scale = 800 / w
+            frame = cv2.resize(frame, (800, int(h * scale)))
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        b64 = base64.b64encode(buffer).decode('utf-8')
+        frames_b64.append(b64)
+
+    cap.release()
+    print(f"[INFO] {len(frames_b64)} captures extraites")
+    return frames_b64
+
+
 async def run_analysis(aid: str):
     job = analyses[aid]
     try:
         job["status"] = "processing"
-        job["progress"] = 15
-        await asyncio.sleep(1.2)
+        job["progress"] = 10
 
-        job["progress"] = 35
-        await asyncio.sleep(1.5)
+        loop = asyncio.get_event_loop()
 
-        job["progress"] = 55
-        report = await call_claude(job["game"], job["filename"], job["filesize"])
+        job["progress"] = 25
+        frames = await loop.run_in_executor(
+            None,
+            lambda: extract_frames(job["filepath"], num_frames=8)
+        )
 
-        job["progress"] = 85
-        await asyncio.sleep(0.8)
+        job["progress"] = 50
+        report = await call_claude_vision(
+            game=job["game"],
+            filename=job["filename"],
+            frames_b64=frames
+        )
+
+        job["progress"] = 90
+        await asyncio.sleep(0.5)
 
         job["progress"] = 100
         job["status"] = "completed"
@@ -111,24 +156,63 @@ async def run_analysis(aid: str):
         job["status"] = "failed"
         job["error"] = str(e)
         print(f"[ERREUR] Analyse {aid} : {e}")
+        import traceback
+        traceback.print_exc()
 
 
-async def call_claude(game: str, filename: str, filesize: int) -> dict:
+async def call_claude_vision(game: str, filename: str, frames_b64: list) -> dict:
     if not ANTHROPIC_API_KEY:
-        raise ValueError("Clé API Anthropic manquante dans le fichier .env")
+        raise ValueError("Clé API Anthropic manquante")
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    prompt = f"""Tu es MVP.coaching, un coach IA expert en jeux compétitifs.
-Un joueur vient de t'envoyer une rediffusion de sa partie sur {game}.
-Fichier : {filename} ({round(filesize / 1024 / 1024, 1)} Mo)
+    content = []
 
-Génère un rapport de coaching complet et réaliste en JSON avec EXACTEMENT cette structure :
+    content.append({
+        "type": "text",
+        "text": f"""Tu es MVP.coaching, un coach IA expert en jeux compétitifs spécialisé sur {game}.
+
+Je vais te montrer {len(frames_b64)} captures d'écran extraites d'une replay de {game} ({filename}).
+Ces captures sont réparties uniformément sur toute la durée de la partie.
+
+Analyse ATTENTIVEMENT chaque image et observe :
+- L'interface du jeu (HUD, minimap, score, économie, timer)
+- Les positions des joueurs sur la minimap
+- L'état de la partie (round en cours, score, phase)
+- Les actions visibles (combat, déplacement, utilisation de capacités)
+- Les erreurs de positionnement, placement, timing visibles
+- La gestion des ressources
+
+Voici les captures :"""
+    })
+
+    for i, frame_b64 in enumerate(frames_b64):
+        content.append({
+            "type": "text",
+            "text": f"\n--- Capture {i+1}/{len(frames_b64)} ---"
+        })
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/jpeg",
+                "data": frame_b64
+            }
+        })
+
+    content.append({
+        "type": "text",
+        "text": f"""
+
+Basé sur ces captures réelles, génère un rapport de coaching en JSON.
+Sois SPECIFIQUE et cite ce que tu as vraiment observé dans les images.
+
+Réponds UNIQUEMENT avec ce JSON valide :
 
 {{
   "score_global": <entier entre 40 et 85>,
   "jeu": "{game}",
-  "resume": "<2 phrases résumant la performance globale>",
+  "resume": "<2 phrases basées sur ce que tu as observé>",
   "modules": [
     {{
       "id": "decision",
@@ -136,9 +220,9 @@ Génère un rapport de coaching complet et réaliste en JSON avec EXACTEMENT cet
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation précise>"}},
+        {{"type": "critique", "texte": "<observation précise basée sur les images>"}},
         {{"type": "alerte", "texte": "<observation précise>"}},
-        {{"type": "info", "texte": "<observation précise>"}}
+        {{"type": "info", "texte": "<point positif observé>"}}
       ]
     }},
     {{
@@ -147,9 +231,9 @@ Génère un rapport de coaching complet et réaliste en JSON avec EXACTEMENT cet
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation précise>"}},
-        {{"type": "alerte", "texte": "<observation précise>"}},
-        {{"type": "info", "texte": "<observation précise>"}}
+        {{"type": "critique", "texte": "<observation>"}},
+        {{"type": "alerte", "texte": "<observation>"}},
+        {{"type": "info", "texte": "<observation>"}}
       ]
     }},
     {{
@@ -158,9 +242,9 @@ Génère un rapport de coaching complet et réaliste en JSON avec EXACTEMENT cet
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation précise>"}},
-        {{"type": "alerte", "texte": "<observation précise>"}},
-        {{"type": "info", "texte": "<observation précise>"}}
+        {{"type": "critique", "texte": "<observation>"}},
+        {{"type": "alerte", "texte": "<observation>"}},
+        {{"type": "info", "texte": "<observation>"}}
       ]
     }},
     {{
@@ -169,36 +253,33 @@ Génère un rapport de coaching complet et réaliste en JSON avec EXACTEMENT cet
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation précise>"}},
-        {{"type": "alerte", "texte": "<observation précise>"}},
-        {{"type": "info", "texte": "<observation précise>"}}
+        {{"type": "critique", "texte": "<observation>"}},
+        {{"type": "alerte", "texte": "<observation>"}},
+        {{"type": "info", "texte": "<observation>"}}
       ]
     }}
   ],
   "plan_semaine": [
-    "<exercice concret 1>",
-    "<exercice concret 2>",
-    "<exercice concret 3>"
+    "<exercice concret basé sur les faiblesses observées>",
+    "<exercice concret>",
+    "<exercice concret>"
   ],
-  "point_fort": "<la meilleure chose que le joueur a faite>",
-  "priorite": "<la chose la plus importante a corriger>"
-}}
-
-Reponds UNIQUEMENT avec le JSON valide, sans texte avant ou apres, sans markdown, sans apostrophes dans les cles."""
+  "point_fort": "<ce que tu as vraiment vu de positif>",
+  "priorite": "<la correction la plus urgente basée sur les images>"
+}}"""
+    })
 
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(
         None,
         lambda: client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}]
+            model="claude-opus-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": content}]
         )
     )
 
     raw = response.content[0].text.strip()
-
-    # Nettoie et parse le JSON
     raw = re.sub(r'```json|```', '', raw).strip()
     start = raw.find("{")
     end = raw.rfind("}") + 1
@@ -207,7 +288,6 @@ Reponds UNIQUEMENT avec le JSON valide, sans texte avant ou apres, sans markdown
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        # Corrige les virgules en trop
         raw = re.sub(r',\s*}', '}', raw)
         raw = re.sub(r',\s*]', ']', raw)
         return json.loads(raw)
