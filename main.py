@@ -170,26 +170,32 @@ async def call_claude_vision(game: str, filename: str, frames_b64: list) -> dict
 
     content.append({
         "type": "text",
-        "text": f"""Tu es MVP.coaching, un coach IA expert en jeux compétitifs spécialisé sur {game}.
+        "text": f"""Tu es un coach professionnel esport spécialisé sur {game} avec 10 ans d'experience.
+Tu analyses une replay d'un joueur qui veut progresser.
+Tu vas recevoir {len(frames_b64)} captures d'ecran extraites de la partie.
 
-Je vais te montrer {len(frames_b64)} captures d'écran extraites d'une replay de {game} ({filename}).
-Ces captures sont réparties uniformément sur toute la durée de la partie.
+REGLES STRICTES DE COACHING :
 
-Tu es un coach sévère mais bienveillant. Tu NE décris PAS ce que tu vois.
-Tu identifies directement CE QUE LE JOUEUR FAIT MAL et comment le corriger.
+1. JAMAIS de description — tu ne racontes pas ce que tu vois, tu coaches.
+   Mauvais : "On voit le joueur en position mid"
+   Bon : "Ta position mid t'expose a 3 angles — recule derriere le pilier et jiggle peek"
 
-Pour chaque capture, pose-toi ces questions :
-- Quelle erreur précise le joueur commet-il ici ?
-- Quelle aurait été la bonne décision dans cette situation ?
-- Quel exercice concret va corriger cette erreur ?
+2. Chaque critique = erreur precise + correction immediate + pourquoi c'est important
+   Format : "Tu fais X → a la place fais Y → parce que Z"
 
-INTERDIT : décrire la scène, raconter ce qui se passe
-OBLIGATOIRE : identifier l'erreur, expliquer la correction, donner un exercice
-Pour les points "info" uniquement : cite un truc que le joueur fait BIEN
-et pourquoi c'est une bonne habitude à garder.
-Les points "critique" et "alerte" restent focalisés sur les corrections.
+3. Chaque alerte = mauvaise habitude + exercice concret pour la corriger
+   Format : "Tu as tendance a X → entraine-toi a Y pendant tes deathmatch"
 
-Voici les captures :"""
+4. Chaque info = point fort observe + comment l'exploiter encore plus
+   Format : "Ton X est solide → exploite-le davantage en faisant Y"
+
+5. Utilise le vocabulaire specifique de {game} :
+   Valorant : spike, site, eco, full buy, ult, flash, jiggle peek, crosshair placement, off-angle
+   League of Legends : gank, roam, farm, vision control, teamfight, split push, wave management
+   CS2 : eco, force buy, flash, smoke, peek, retake, rotate, utility
+   Overwatch 2 : ult economy, dive, poke, tank line, off-angle, contest
+
+Voici les captures de la replay :"""
     })
 
     for i, frame_b64 in enumerate(frames_b64):
@@ -210,36 +216,34 @@ Voici les captures :"""
         "type": "text",
         "text": f"""
 
-Basé sur ces captures réelles, génère un rapport de coaching en JSON.
-Sois SPECIFIQUE et cite ce que tu as vraiment observé dans les images.
-
-Réponds UNIQUEMENT avec ce JSON valide :
+Genere le rapport de coaching. Chaque point doit etre une instruction directe et actionnable.
+Reponds UNIQUEMENT avec ce JSON valide, sans texte avant ou apres :
 
 {{
-  "score_global": <entier entre 40 et 85>,
+  "score_global": <entier entre 35 et 90>,
   "jeu": "{game}",
-  "resume": "<2 phrases basées sur ce que tu as observé>",
+  "resume": "<2 phrases de bilan direct : ce qui bloque la progression et ce qui est deja solide>",
   "modules": [
     {{
       "id": "decision",
-      "label": "Prise de décision",
+      "label": "Prise de decision",
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation précise basée sur les images>"}},
-        {{"type": "alerte", "texte": "<observation précise>"}},
-        {{"type": "info", "texte": "<point positif observé>"}}
+        {{"type": "critique", "texte": "<Tu fais X, fais Y a la place parce que Z>"}},
+        {{"type": "alerte", "texte": "<Tu as tendance a X, corrige en faisant Y>"}},
+        {{"type": "info", "texte": "<Ton X est une bonne habitude, exploite-la en faisant Y>"}}
       ]
     }},
     {{
       "id": "mecanique",
-      "label": "Mécanique et Aim",
+      "label": "Mecanique et Aim",
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation>"}},
-        {{"type": "alerte", "texte": "<observation>"}},
-        {{"type": "info", "texte": "<observation>"}}
+        {{"type": "critique", "texte": "<Tu fais X, fais Y parce que Z>"}},
+        {{"type": "alerte", "texte": "<Tu as tendance a X, corrige en faisant Y>"}},
+        {{"type": "info", "texte": "<Ton X est solide, continue et ameliore avec Y>"}}
       ]
     }},
     {{
@@ -248,9 +252,9 @@ Réponds UNIQUEMENT avec ce JSON valide :
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation>"}},
-        {{"type": "alerte", "texte": "<observation>"}},
-        {{"type": "info", "texte": "<observation>"}}
+        {{"type": "critique", "texte": "<Tu fais X, fais Y parce que Z>"}},
+        {{"type": "alerte", "texte": "<Tu as tendance a X, corrige en faisant Y>"}},
+        {{"type": "info", "texte": "<Ton X est une bonne habitude, exploite-la en Y>"}}
       ]
     }},
     {{
@@ -259,19 +263,19 @@ Réponds UNIQUEMENT avec ce JSON valide :
       "score": <entier 0-100>,
       "niveau": "<Faible|Moyen|Bon|Excellent>",
       "points": [
-        {{"type": "critique", "texte": "<observation>"}},
-        {{"type": "alerte", "texte": "<observation>"}},
-        {{"type": "info", "texte": "<observation>"}}
+        {{"type": "critique", "texte": "<Tu fais X, fais Y parce que Z>"}},
+        {{"type": "alerte", "texte": "<Tu as tendance a X, corrige en faisant Y>"}},
+        {{"type": "info", "texte": "<Ton X montre une bonne lecture, renforce avec Y>"}}
       ]
     }}
   ],
   "plan_semaine": [
-    "<exercice concret basé sur les faiblesses observées>",
-    "<exercice concret>",
-    "<exercice concret>"
+    "<Exercice 1 : action concrete + duree + objectif precis>",
+    "<Exercice 2 : action concrete + duree + objectif precis>",
+    "<Exercice 3 : action concrete + duree + objectif precis>"
   ],
-  "point_fort": "<ce que tu as vraiment vu de positif>",
-  "priorite": "<la correction la plus urgente basée sur les images>"
+  "point_fort": "<La meilleure habitude observee et pourquoi elle te donne un avantage>",
+  "priorite": "<L'erreur qui te coute le plus de rounds et comment la corriger cette semaine>"
 }}"""
     })
 
@@ -280,7 +284,7 @@ Réponds UNIQUEMENT avec ce JSON valide :
         None,
         lambda: client.messages.create(
             model="claude-opus-4-6",
-            max_tokens=2000,
+            max_tokens=2500,
             messages=[{"role": "user", "content": content}]
         )
     )
